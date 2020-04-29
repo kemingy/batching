@@ -74,7 +74,8 @@ func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.
 func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	data := ctx.PostBody()
 	if len(data) == 0 {
-		ctx.SetStatusCode(400)
+		// as a naive health check
+		ctx.SetStatusCode(200)
 		return
 	}
 
