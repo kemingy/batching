@@ -47,7 +47,7 @@ type Batching struct {
 }
 
 func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.Duration) *Batching {
-	filePath := name + ".sock"
+	filePath := name + ".socket"
 	if _, err := os.Stat(filePath); err == nil {
 		log.Printf("Socket file (%v) already exists\n", filePath)
 		if err := os.Remove(filePath); err != nil {
@@ -81,7 +81,9 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	job := newJob(data, b.timeout)
 	select {
 	case b.queue <- job:
+		b.jobsLock.Lock()
 		b.jobs[job.id] = job
+		b.jobsLock.Unlock()
 	default:
 		// queue is full
 		log.Println("Queue is full. Return error code 429.")
@@ -113,6 +115,11 @@ func (b *Batching) batchQuery(conn net.Conn) {
 	for time.Now().Before(waitUntil) && len(batch) < b.batchSize {
 		select {
 		case job := <-b.queue:
+			if time.Now().After(job.expire) {
+				job.errorCode = 408
+				job.done <- true
+				continue
+			}
 			batch[job.id] = job.data
 		case <-time.After(time.Millisecond):
 			continue
@@ -123,9 +130,12 @@ func (b *Batching) batchQuery(conn net.Conn) {
 	if err != nil {
 		log.Fatal("Msgpack encode error:", err)
 	}
-	_, err = conn.Write(data)
-	if err != nil {
-		log.Fatal("Socket write error:", err)
+	length := make([]byte, IntByteLength)
+	binary.BigEndian.PutUint32(length, uint32(len(data)))
+	_, errLen := conn.Write(length)
+	_, errData := conn.Write(data)
+	if errLen != nil || errData != nil{
+		log.Fatal("Socket write error:", errLen, errData)
 	}
 }
 
@@ -143,12 +153,14 @@ func (b *Batching) collectResult(conn net.Conn, length uint32) {
 	}
 
 	for id, result := range batch {
+		b.jobsLock.Lock()
 		job, ok := b.jobs[id]
 		if ok {
 			job.result = result
 			job.done <- true
 			delete(b.jobs, id)
 		}
+		b.jobsLock.Unlock()
 	}
 
 	// next batch
@@ -176,22 +188,5 @@ func (b *Batching) Run() {
 		} else {
 			go b.collectResult(conn, length)
 		}
-
-		go func(conn net.Conn) {
-			for {
-				buf := make([]byte, 1024)
-				length, err := conn.Read(buf[:])
-				if err != nil {
-					return
-				}
-				data := buf[0:length]
-				log.Println(">", string(data))
-				data = append(data, "@@@"...)
-				_, err = conn.Write(data)
-				if err != nil {
-					log.Fatal("Send to client error: ", err)
-				}
-			}
-		}(conn)
 	}
 }
