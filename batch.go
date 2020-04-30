@@ -81,6 +81,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	}
 
 	job := newJob(data, b.timeout)
+	// append job to the queue
 	select {
 	case b.queue <- job:
 		b.jobsLock.Lock()
@@ -93,6 +94,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 		job.done <- true
 	}
 
+	// waiting for job done by workers
 	select {
 	case <-job.done:
 		if job.errorCode != 0 {
@@ -100,6 +102,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 		}
 		ctx.SetBody(job.result)
 	case <-time.After(b.timeout):
+		//  timeout
 		b.jobsLock.Lock()
 		delete(b.jobs, job.id)
 		b.jobsLock.Unlock()
@@ -111,7 +114,7 @@ func (b *Batching) Stop() error {
 	return b.socket.Close()
 }
 
-func (b *Batching) batchQuery(conn net.Conn) {
+func (b *Batching) send(conn net.Conn) {
 	batch := make(String2Bytes)
 	job := <-b.queue
 	batch[job.id] = job.data
@@ -144,7 +147,7 @@ func (b *Batching) batchQuery(conn net.Conn) {
 	}
 }
 
-func (b *Batching) collectResult(conn net.Conn, length uint32) {
+func (b *Batching) receive(conn net.Conn, length uint32) {
 	data := make([]byte, length)
 	_, err := conn.Read(data)
 	if err != nil {
@@ -169,7 +172,7 @@ func (b *Batching) collectResult(conn net.Conn, length uint32) {
 	}
 
 	// next batch
-	go b.batchQuery(conn)
+	go b.send(conn)
 }
 
 func (b *Batching) Run() {
@@ -189,9 +192,9 @@ func (b *Batching) Run() {
 
 		if length == 0 {
 			// init query
-			go b.batchQuery(conn)
+			go b.send(conn)
 		} else {
-			go b.collectResult(conn, length)
+			go b.receive(conn, length)
 		}
 	}
 }
