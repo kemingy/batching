@@ -35,7 +35,7 @@ func newJob(data []byte, timeout time.Duration) *Job {
 }
 
 type Batching struct {
-	name       string
+	Name       string
 	socket     net.Listener
 	maxLatency time.Duration
 	batchSize  int
@@ -61,12 +61,13 @@ func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.
 	}
 
 	return &Batching{
-		name:       name,
+		Name:       name,
 		socket:     socket,
 		maxLatency: maxLatency,
 		batchSize:  batchSize,
 		capacity:   capacity,
 		timeout:    timeout,
+		queue:      make(chan *Job, capacity),
 		jobs:       make(map[string]*Job),
 	}
 }
@@ -99,6 +100,9 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 		}
 		ctx.SetBody(job.result)
 	case <-time.After(b.timeout):
+		b.jobsLock.Lock()
+		delete(b.jobs, job.id)
+		b.jobsLock.Unlock()
 		ctx.TimeoutError("Timeout!")
 	}
 }
@@ -135,7 +139,7 @@ func (b *Batching) batchQuery(conn net.Conn) {
 	binary.BigEndian.PutUint32(length, uint32(len(data)))
 	_, errLen := conn.Write(length)
 	_, errData := conn.Write(data)
-	if errLen != nil || errData != nil{
+	if errLen != nil || errData != nil {
 		log.Fatal("Socket write error:", errLen, errData)
 	}
 }
