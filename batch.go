@@ -12,7 +12,11 @@ import (
 	"time"
 )
 
-const IntByteLength = 4
+const (
+	IntByteLength = 4
+	UUIDLength = 36
+	ErrorIDsKey = "error_ids"
+)
 
 type String2Bytes map[string][]byte
 
@@ -160,16 +164,28 @@ func (b *Batching) receive(conn net.Conn, length uint32) {
 		log.Fatal("Msgpack decode error:", err)
 	}
 
+	b.jobsLock.Lock()
+	// validation errors
+	errors, ok := batch[ErrorIDsKey]
+	if ok {
+		for i := UUIDLength; i <= len(errors); i+= UUIDLength {
+			id := string(errors[i-36:i])
+			job, exist := b.jobs[id]
+			if exist {
+				job.errorCode = 422
+			}
+		}
+	}
+	// inference result
 	for id, result := range batch {
-		b.jobsLock.Lock()
 		job, ok := b.jobs[id]
 		if ok {
 			job.result = result
 			job.done <- true
 			delete(b.jobs, id)
 		}
-		b.jobsLock.Unlock()
 	}
+	b.jobsLock.Unlock()
 
 	// next batch
 	go b.send(conn)
