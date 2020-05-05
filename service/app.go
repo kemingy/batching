@@ -16,6 +16,7 @@ func main() {
 		Handler: batch.HandleHTTP,
 	}
 
+	go batch.Run()
 	go func() {
 		if err := s.ListenAndServe("localhost:8080"); err != nil {
 			log.Fatalf("error in ListenAndServe: %s", err)
