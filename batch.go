@@ -166,7 +166,7 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 	data := make([]byte, length)
 	_, err := conn.Read(data)
 	if err != nil {
-		log.Fatal("Socket read error: ", err)
+		return err
 	}
 
 	batch := make(String2Bytes)
