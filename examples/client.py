@@ -11,12 +11,15 @@ packer = msgpack.Packer(
 
 
 def request(text):
-    with httpx.Client() as client:
-        resp = client.post(URL, data=packer.pack({'text': text}))
-        if resp.status_code == 200:
-            print(text, msgpack.unpackb(resp.content, raw=False))
+    return httpx.post(URL, data=packer.pack({'num': text}))
 
 
 if __name__ == "__main__":
     with futures.ThreadPoolExecutor() as executor:
-        list(executor.map(request, ('hello world', 'test', 'hi')))
+        text = (0, 'test', -1, 233)
+        results = executor.map(request, text)
+        for i, resp in enumerate(results):
+            print(
+                f'>> {text[i]} -> [{resp.status_code}]\n'
+                f'{msgpack.unpackb(resp.content, raw=False)}'
+            )

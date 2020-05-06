@@ -4,11 +4,11 @@ from ventu import Ventu
 
 
 class Req(BaseModel):
-    text: str
+    num: int
 
 
 class Resp(BaseModel):
-    label: bool
+    square: int
 
 
 class ModelInference(Ventu):
@@ -16,14 +16,13 @@ class ModelInference(Ventu):
         super().__init__(*args, **kwargs)
 
     def preprocess(self, data: Req):
-        return data.text
+        return data.num
 
     def batch_inference(self, data):
-        print(data)
-        return [True if len(text) >= 4 else False for text in data]
+        return [num ** 2 for num in data]
 
     def postprocess(self, data):
-        return {'label': data}
+        return {'square': data}
 
 
 if __name__ == "__main__":
