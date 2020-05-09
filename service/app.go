@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"github.com/kemingy/batching"
 	"github.com/valyala/fasthttp"
 	"log"
@@ -10,7 +11,19 @@ import (
 )
 
 func main() {
-	batch := batching.NewBatching("batching", 32, 1024, 10*time.Millisecond, 5*time.Second)
+	name := flag.String("name", "batching", "socket name: '{name}.socket'")
+	batchSize := flag.Int("batch", 32, "max batch size")
+	capacity := flag.Int("capacity", 1024, "max jobs in the queue")
+	latency := flag.Int("latency", 10, "max latency (millisecond)")
+	timeout := flag.Int("timeout", 5000, "timeout for a job (millisecond)")
+	flag.Parse()
+	batch := batching.NewBatching(
+		*name,
+		*batchSize,
+		*capacity,
+		time.Millisecond * time.Duration(*latency),
+		time.Millisecond * time.Duration(*timeout),
+	)
 
 	s := &fasthttp.Server{
 		Handler: batch.HandleHTTP,
