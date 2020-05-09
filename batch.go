@@ -121,6 +121,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 }
 
 func (b *Batching) Stop() error {
+	close(b.queue)
 	return b.socket.Close()
 }
 
