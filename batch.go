@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/valyala/fasthttp"
 	"github.com/vmihailenco/msgpack/v4"
+	"go.uber.org/zap"
 	"io"
-	"log"
 	"net"
 	"os"
 	"sync"
@@ -47,26 +47,32 @@ type Batching struct {
 	batchSize  int
 	capacity   int
 	timeout    time.Duration
+	logger     *zap.Logger
 	queue      chan *Job
 	jobs       map[string]*Job
 	jobsLock   sync.Mutex
 }
 
 func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.Duration) *Batching {
+	logger, err := zap.NewProduction()
+	if err != nil {
+		panic("Cannot create a zap logger")
+	}
 	filePath := name + ".socket"
 	if _, err := os.Stat(filePath); err == nil {
-		log.Printf("Socket file (%v) already exists. Try to remove it\n", filePath)
+		logger.Info("Socket file already exists. Try to remove it", zap.String("name", filePath))
 		if err := os.Remove(filePath); err != nil {
-			log.Printf("Remove socket file error: %v\n", err)
+			logger.Fatal("Remove socket file error", zap.Error(err))
 		}
 	}
 
 	socket, err := net.Listen("unix", filePath)
 	if err != nil {
-		log.Fatal("Listen error: ", err)
+		logger.Error("Cannot listen to the socket", zap.Error(err))
+		panic("Cannot listen to the socket")
 	}
 
-	log.Printf("Listen on %s.socket\n", name)
+	logger.Info("Listen on socket", zap.String("name", filePath))
 	return &Batching{
 		Name:       name,
 		socket:     socket,
@@ -74,6 +80,7 @@ func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.
 		batchSize:  batchSize,
 		capacity:   capacity,
 		timeout:    timeout,
+		logger:     logger,
 		queue:      make(chan *Job, capacity),
 		jobs:       make(map[string]*Job),
 	}
@@ -84,13 +91,13 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	if len(data) == 0 {
 		// as a naive health check
 		ctx.SetStatusCode(200)
-		log.Println("Health check request")
+		b.logger.Info("Health check request")
 		return
 	}
 
 	job := newJob(data, b.timeout)
 	// append job to the queue
-	log.Println("Add job to the queue: ", job.id)
+	b.logger.Info("Add job to the queue", zap.String("jobID", job.id))
 	select {
 	case b.queue <- job:
 		b.jobsLock.Lock()
@@ -98,7 +105,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 		b.jobsLock.Unlock()
 	default:
 		// queue is full
-		log.Println("Queue is full. Return error code 429.")
+		b.logger.Warn("Queue is full. Return error code 429")
 		ctx.SetStatusCode(429)
 		job.done <- true
 	}
@@ -115,12 +122,14 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 		b.jobsLock.Lock()
 		delete(b.jobs, job.id)
 		b.jobsLock.Unlock()
-		log.Println("Delete timeout job: ", job.id)
+		b.logger.Warn("Delete timeout job", zap.String("jobID", job.id))
 		ctx.TimeoutError("Timeout!")
 	}
 }
 
 func (b *Batching) Stop() error {
+	b.logger.Info("Close socket and queue channel, flush logging")
+	defer b.logger.Sync()
 	close(b.queue)
 	return b.socket.Close()
 }
@@ -135,12 +144,12 @@ func (b *Batching) send(conn net.Conn) error {
 		select {
 		case job := <-b.queue:
 			if time.Now().After(job.expire) {
-				log.Println("Job already expired before sent to the worker: ", job.id)
+				b.logger.Info("Job already expired before sent to the worker", zap.String("jobID", job.id))
 				job.errorCode = 408
 				job.done <- true
 				continue
 			}
-			log.Println("Job prepared to be sent: ", job.id)
+			b.logger.Info("Job prepared to be sent", zap.String("jobID", job.id))
 			batch[job.id] = job.data
 		case <-time.After(time.Millisecond):
 			continue
@@ -149,21 +158,21 @@ func (b *Batching) send(conn net.Conn) error {
 
 	data, err := msgpack.Marshal(batch)
 	if err != nil {
-		log.Fatal("Msgpack encode error: ", err)
+		b.logger.Fatal("Msgpack encode error", zap.Error(err))
 	}
 	length := make([]byte, IntByteLength)
 	binary.BigEndian.PutUint32(length, uint32(len(data)))
 	_, errLen := conn.Write(length)
 	_, errData := conn.Write(data)
 	if errLen != nil || errData != nil {
-		log.Println("Socket write error: ", errLen, errData)
+		b.logger.Warn("Socket write error", zap.Error(errLen), zap.Error(errData))
 		return fmt.Errorf("conn error: %v + %v", errLen, errData)
 	}
 	return nil
 }
 
 func (b *Batching) receive(conn net.Conn, length uint32) error {
-	log.Println("Received bytes length: ", length)
+	b.logger.Info("Received bytes length", zap.Uint32("length", length))
 	data := make([]byte, length)
 	_, err := conn.Read(data)
 	if err != nil {
@@ -173,9 +182,9 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 	batch := make(String2Bytes)
 	err = msgpack.Unmarshal(data, &batch)
 	if err != nil {
-		log.Fatal("Msgpack decode error: ", err)
+		b.logger.Fatal("Msgpack decode error", zap.Error(err))
 	}
-	log.Println("Received data: ", data)
+	b.logger.Debug("Received data", zap.ByteString("data", data))
 
 	b.jobsLock.Lock()
 	// validation errors
@@ -186,7 +195,7 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 			job, exist := b.jobs[id]
 			if exist {
 				job.errorCode = 422
-				log.Println("Validation error for job: ", job.id)
+				b.logger.Info("Validation error for job", zap.Int("errorCode", job.errorCode))
 			}
 		}
 	}
@@ -194,7 +203,7 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 	for id, result := range batch {
 		job, ok := b.jobs[id]
 		if ok {
-			log.Println("Job is done: ", job.id)
+			b.logger.Info("Job is done", zap.String("jobID", job.id))
 			job.result = result
 			job.done <- true
 			delete(b.jobs, id)
@@ -210,19 +219,22 @@ func (b *Batching) Run() {
 	for {
 		conn, err := b.socket.Accept()
 		if err != nil {
-			log.Fatal("Accept error: ", err)
+			b.logger.Fatal("Accept error: ", zap.Error(err))
 		}
-		log.Printf("%v accepts connection from %v\n", conn.LocalAddr(), conn.RemoteAddr())
+		b.logger.Info("Accept socket connection",
+			zap.String("local", conn.LocalAddr().String()),
+			zap.String("remote", conn.RemoteAddr().String()),
+		)
 
 		go func(conn net.Conn) {
 			lengthByte := make([]byte, IntByteLength)
 			for {
 				if _, err := conn.Read(lengthByte); err != nil {
 					if err == io.EOF {
-						log.Println("EOF.")
+						b.logger.Warn("EOF")
 						break
 					}
-					log.Println("Read buffer error:", err)
+					b.logger.Warn("Read buffer error", zap.Error(err))
 					continue
 				}
 				length := binary.BigEndian.Uint32(lengthByte)
@@ -235,7 +247,7 @@ func (b *Batching) Run() {
 				}
 
 				if err != nil {
-					log.Println(err)
+					b.logger.Warn("Socket error", zap.Error(err))
 					break
 				}
 			}
