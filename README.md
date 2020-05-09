@@ -14,16 +14,20 @@
 go run service/app.go --help
 ```
 
-```shell script
+```
 Usage of app:
   -batch int
         max batch size (default 32)
   -capacity int
         max jobs in the queue (default 1024)
+  -host string
+        host address (default "localhost")
   -latency int
         max latency (millisecond) (default 10)
   -name string
         socket name: '{name}.socket' (default "batching")
+  -port int
+        service port (default 8080)
   -timeout int
         timeout for a job (millisecond) (default 5000)
 ```
