@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/kemingy/batching"
 	"github.com/valyala/fasthttp"
 	"log"
@@ -16,6 +17,8 @@ func main() {
 	capacity := flag.Int("capacity", 1024, "max jobs in the queue")
 	latency := flag.Int("latency", 10, "max latency (millisecond)")
 	timeout := flag.Int("timeout", 5000, "timeout for a job (millisecond)")
+	host := flag.String("host", "localhost", "host address")
+	port := flag.Int("port", 8080, "service port")
 	flag.Parse()
 	batch := batching.NewBatching(
 		*name,
@@ -31,7 +34,7 @@ func main() {
 
 	go batch.Run()
 	go func() {
-		if err := s.ListenAndServe("localhost:8080"); err != nil {
+		if err := s.ListenAndServe(fmt.Sprintf("%s:%d", *host, *port)); err != nil {
 			log.Fatalf("error in ListenAndServe: %s", err)
 		}
 	}()
