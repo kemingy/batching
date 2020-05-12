@@ -6,9 +6,25 @@ from ventu import Ventu
 class Req(BaseModel):
     num: int
 
+    class Config:
+        schema_extra = {
+            'examples': [
+                {'num': 23},
+                {'num': 0},
+            ]
+        }
+
 
 class Resp(BaseModel):
     square: int
+
+    class Config:
+        schema_extra = {
+            'examples': [
+                {'square': 23 * 23},
+                {'square': 0},
+            ]
+        }
 
 
 class ModelInference(Ventu):
