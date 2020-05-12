@@ -20,14 +20,16 @@ const (
 	ErrorIDsKey   = "error_ids"
 )
 
+// structure used in socket communication protocol
 type String2Bytes map[string][]byte
 
+// Job wrap the new request as a job waiting to be done by workers
 type Job struct {
 	id        string
 	done      chan bool
-	data      []byte
-	result    []byte
-	errorCode int
+	data      []byte // request data
+	result    []byte // inference result or error message
+	errorCode int // HTTP Error Code
 	expire    time.Time
 }
 
@@ -40,25 +42,30 @@ func newJob(data []byte, timeout time.Duration) *Job {
 	}
 }
 
+// Batching provides HTTP handler and socket communication.
+// It generate batch jobs when workers request and send the inference results (or error)
+// to the right client.
 type Batching struct {
-	Name       string
+	Name       string // socket name
 	socket     net.Listener
-	maxLatency time.Duration
-	batchSize  int
-	capacity   int
-	timeout    time.Duration
+	maxLatency time.Duration // max latency for a batch inference to wait
+	batchSize  int // max batch size for a batch inference
+	capacity   int // the capacity of the batching queue
+	timeout    time.Duration // timeout for jobs in the queue
 	logger     *zap.Logger
-	queue      chan *Job
-	jobs       map[string]*Job
-	jobsLock   sync.Mutex
+	queue      chan *Job // job queue
+	jobs       map[string]*Job // use job id as the key to find the job
+	jobsLock   sync.Mutex // lock for jobs
 }
 
+// NewBatching creates a Batching instance
 func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.Duration) *Batching {
 	logger, err := zap.NewProduction()
 	if err != nil {
 		panic("Cannot create a zap logger")
 	}
 	filePath := name + ".socket"
+	// check the socket file (remove if already exists)
 	if _, err := os.Stat(filePath); err == nil {
 		logger.Info("Socket file already exists. Try to remove it", zap.String("name", filePath))
 		if err := os.Remove(filePath); err != nil {
@@ -86,6 +93,7 @@ func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.
 	}
 }
 
+// HandleHTTP is the handler for fasthttp
 func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	data := ctx.PostBody()
 	if len(data) == 0 {
@@ -99,6 +107,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	// append job to the queue
 	b.logger.Info("Add job to the queue", zap.String("jobID", job.id))
 	select {
+	// append to the queue
 	case b.queue <- job:
 		b.jobsLock.Lock()
 		b.jobs[job.id] = job
@@ -127,6 +136,7 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	}
 }
 
+// Stop the batching service and socket, close the queue channel
 func (b *Batching) Stop() error {
 	b.logger.Info("Close socket and queue channel, flush logging")
 	defer b.logger.Sync()
@@ -134,24 +144,29 @@ func (b *Batching) Stop() error {
 	return b.socket.Close()
 }
 
+// send a batch jobs to the workers
 func (b *Batching) send(conn net.Conn) error {
 	batch := make(String2Bytes)
 	job := <-b.queue
 	batch[job.id] = job.data
 	// timing from getting the first query data
 	waitUntil := time.Now().Add(b.maxLatency)
+	// check latency and batch size
 	for time.Now().Before(waitUntil) && len(batch) < b.batchSize {
 		select {
 		case job := <-b.queue:
+			// expired job
 			if time.Now().After(job.expire) {
 				b.logger.Info("Job already expired before sent to the worker", zap.String("jobID", job.id))
 				job.errorCode = 408
 				job.done <- true
 				continue
 			}
+			// append job to the batch
 			b.logger.Info("Job prepared to be sent", zap.String("jobID", job.id))
 			batch[job.id] = job.data
 		case <-time.After(time.Millisecond):
+			// minimal interval: millisecond
 			continue
 		}
 	}
@@ -162,6 +177,7 @@ func (b *Batching) send(conn net.Conn) error {
 	}
 	length := make([]byte, IntByteLength)
 	binary.BigEndian.PutUint32(length, uint32(len(data)))
+	// write length and packed data to the socket
 	_, errLen := conn.Write(length)
 	_, errData := conn.Write(data)
 	if errLen != nil || errData != nil {
@@ -171,6 +187,7 @@ func (b *Batching) send(conn net.Conn) error {
 	return nil
 }
 
+// receive results from workers
 func (b *Batching) receive(conn net.Conn, length uint32) error {
 	b.logger.Info("Received bytes length", zap.Uint32("length", length))
 	data := make([]byte, length)
@@ -208,6 +225,7 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 			job.done <- true
 			delete(b.jobs, id)
 		}
+		// job may already timeout and return
 	}
 	b.jobsLock.Unlock()
 
@@ -215,8 +233,10 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 	return b.send(conn)
 }
 
+// Run the socket communication
 func (b *Batching) Run() {
 	for {
+		// accept socket connection
 		conn, err := b.socket.Accept()
 		if err != nil {
 			b.logger.Fatal("Accept error: ", zap.Error(err))
@@ -231,6 +251,7 @@ func (b *Batching) Run() {
 			for {
 				if _, err := conn.Read(lengthByte); err != nil {
 					if err == io.EOF {
+						// usually this means the worker is dead
 						b.logger.Warn("EOF")
 						break
 					}
@@ -240,9 +261,10 @@ func (b *Batching) Run() {
 				length := binary.BigEndian.Uint32(lengthByte)
 
 				if length == 0 {
-					// init query
+					// init query from the worker
 					err = b.send(conn)
 				} else {
+					// receive results from workers
 					err = b.receive(conn, length)
 				}
 
