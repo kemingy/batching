@@ -24,8 +24,8 @@ func main() {
 		*name,
 		*batchSize,
 		*capacity,
-		time.Millisecond * time.Duration(*latency),
-		time.Millisecond * time.Duration(*timeout),
+		time.Millisecond*time.Duration(*latency),
+		time.Millisecond*time.Duration(*timeout),
 	)
 
 	s := &fasthttp.Server{
