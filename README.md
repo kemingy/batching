@@ -1,5 +1,11 @@
 # Dynamic Batching for Deep Learning Serving
 
+[![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kemingy/batching)](https://goreportcard.com/report/github.com/kemingy/batching)
+[![GoDoc](https://img.shields.io/badge/Godoc-reference-blue.svg)](https://godoc.org/github.com/kemingy/batching)
+![GitHub Actions](https://github.com/kemingy/batching/workflows/Go/badge.svg)
+[![LICENSE](https://img.shields.io/github/license/kemingy/batching.svg)](https://github.com/kemingy/batching/blob/master/LICENSE)
+
 [Ventu](https://github.com/kemingy/ventu) already implement this protocol, so it can be used as the worker for deep learning inference.
 
 ## Features
