@@ -18,9 +18,9 @@ const (
 	// IntByteLength defines the byte length of `length` for data
 	IntByteLength = 4
 	// UUIDLength defines the string bits length
-	UUIDLength    = 36
+	UUIDLength = 36
 	// ErrorIDsKey defines the key for error IDs
-	ErrorIDsKey   = "error_ids"
+	ErrorIDsKey = "error_ids"
 )
 
 // String2Bytes structure used in socket communication protocol
