@@ -13,6 +13,9 @@
 * dynamic batching with batch size and latency
 * invalid request won't affects others in the same batch
 * communicate with workers through Unix domain socket
+* load balancing
+
+If you are interested in the design, check my blog [Deep Learning Serving Framework](https://kemingy.github.io/blogs/deep-learning-serving/).
 
 ## Configs
 
