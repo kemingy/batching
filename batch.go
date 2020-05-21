@@ -15,12 +15,15 @@ import (
 )
 
 const (
+	// IntByteLength defines the byte length of `length` for data
 	IntByteLength = 4
+	// UUIDLength defines the string bits length
 	UUIDLength    = 36
+	// ErrorIDsKey defines the key for error IDs
 	ErrorIDsKey   = "error_ids"
 )
 
-// structure used in socket communication protocol
+// String2Bytes structure used in socket communication protocol
 type String2Bytes map[string][]byte
 
 // Job wrap the new request as a job waiting to be done by workers
@@ -29,7 +32,7 @@ type Job struct {
 	done      chan bool
 	data      []byte // request data
 	result    []byte // inference result or error message
-	errorCode int // HTTP Error Code
+	errorCode int    // HTTP Error Code
 	expire    time.Time
 }
 
@@ -49,13 +52,13 @@ type Batching struct {
 	Name       string // socket name
 	socket     net.Listener
 	maxLatency time.Duration // max latency for a batch inference to wait
-	batchSize  int // max batch size for a batch inference
-	capacity   int // the capacity of the batching queue
+	batchSize  int           // max batch size for a batch inference
+	capacity   int           // the capacity of the batching queue
 	timeout    time.Duration // timeout for jobs in the queue
 	logger     *zap.Logger
-	queue      chan *Job // job queue
+	queue      chan *Job       // job queue
 	jobs       map[string]*Job // use job id as the key to find the job
-	jobsLock   sync.Mutex // lock for jobs
+	jobsLock   sync.Mutex      // lock for jobs
 }
 
 // NewBatching creates a Batching instance
