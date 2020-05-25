@@ -28,20 +28,20 @@ type String2Bytes map[string][]byte
 
 // Job wrap the new request as a job waiting to be done by workers
 type Job struct {
-	id        string
-	done      chan bool
-	data      []byte // request data
-	result    []byte // inference result or error message
-	errorCode int    // HTTP Error Code
-	expire    time.Time
+	id         string
+	done       chan bool
+	data       []byte // request data
+	statusCode int    // HTTP Error Code
+	expire     time.Time
 }
 
 func newJob(data []byte, timeout time.Duration) *Job {
 	return &Job{
-		id:     uuid.New().String(),
-		done:   make(chan bool, 1),
-		data:   data,
-		expire: time.Now().Add(timeout),
+		id:         uuid.New().String(),
+		done:       make(chan bool, 1),
+		data:       data,
+		statusCode: 200,
+		expire:     time.Now().Add(timeout),
 	}
 }
 
@@ -125,10 +125,8 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 	// waiting for job done by workers
 	select {
 	case <-job.done:
-		if job.errorCode != 0 {
-			ctx.SetStatusCode(job.errorCode)
-		}
-		ctx.SetBody(job.result)
+		ctx.SetStatusCode(job.statusCode)
+		ctx.SetBody(job.data)
 	case <-time.After(b.timeout):
 		//  timeout
 		b.jobsLock.Lock()
@@ -161,7 +159,7 @@ func (b *Batching) send(conn net.Conn) error {
 			// expired job
 			if time.Now().After(job.expire) {
 				b.logger.Info("Job already expired before sent to the worker", zap.String("jobID", job.id))
-				job.errorCode = 408
+				job.statusCode = 408
 				job.done <- true
 				continue
 			}
@@ -214,8 +212,8 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 			id := string(errors[i-36 : i])
 			job, exist := b.jobs[id]
 			if exist {
-				job.errorCode = 422
-				b.logger.Info("Validation error for job", zap.Int("errorCode", job.errorCode))
+				job.statusCode = 422
+				b.logger.Info("Validation error for job", zap.Int("statusCode", job.statusCode))
 			}
 		}
 	}
@@ -224,7 +222,7 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 		job, ok := b.jobs[id]
 		if ok {
 			b.logger.Info("Job is done", zap.String("jobID", job.id))
-			job.result = result
+			job.data = result
 			job.done <- true
 			delete(b.jobs, id)
 		}
