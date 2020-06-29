@@ -3,7 +3,8 @@ import httpx
 import msgpack
 
 
-URL = 'http://localhost:8080'
+URL = 'http://localhost:8080/inference'
+HEADER = {'Content-Type': 'application/msgpack'}
 packer = msgpack.Packer(
     autoreset=True,
     use_bin_type=True,
@@ -11,15 +12,20 @@ packer = msgpack.Packer(
 
 
 def request(text):
-    return httpx.post(URL, data=packer.pack({'num': text}))
+    return httpx.post(URL, data=packer.pack({'text': text}), headers=HEADER)
 
 
 if __name__ == "__main__":
     with futures.ThreadPoolExecutor() as executor:
-        text = (0, 'test', -1, 233)
+        text = [
+            'They are smart',
+            'what is your problem?',
+            'I hate that!',
+            'x',
+        ]
         results = executor.map(request, text)
         for i, resp in enumerate(results):
             print(
                 f'>> {text[i]} -> [{resp.status_code}]\n'
-                f'{msgpack.unpackb(resp.content, raw=False)}'
+                f'{msgpack.unpackb(resp.content)}'
             )

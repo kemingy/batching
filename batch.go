@@ -49,7 +49,8 @@ func newJob(data []byte, timeout time.Duration) *Job {
 // It generate batch jobs when workers request and send the inference results (or error)
 // to the right client.
 type Batching struct {
-	Name       string // socket name
+	Address    string // socket file or "{host}:{port}"
+	protocol   string // "unix" (Unix domain socket) or "tcp"
 	socket     net.Listener
 	maxLatency time.Duration // max latency for a batch inference to wait
 	batchSize  int           // max batch size for a batch inference
@@ -62,29 +63,32 @@ type Batching struct {
 }
 
 // NewBatching creates a Batching instance
-func NewBatching(name string, batchSize, capacity int, maxLatency, timeout time.Duration) *Batching {
+func NewBatching(address, protocol string, batchSize, capacity int, maxLatency, timeout time.Duration) *Batching {
 	logger, err := zap.NewProduction()
 	if err != nil {
 		panic("Cannot create a zap logger")
 	}
-	filePath := name + ".socket"
-	// check the socket file (remove if already exists)
-	if _, err := os.Stat(filePath); err == nil {
-		logger.Info("Socket file already exists. Try to remove it", zap.String("name", filePath))
-		if err := os.Remove(filePath); err != nil {
-			logger.Fatal("Remove socket file error", zap.Error(err))
+	if protocol == "unix" {
+		// check the socket file (remove if already exists)
+		if _, err := os.Stat(address); err == nil {
+			logger.Info("Socket file already exists. Try to remove it", zap.String("address", address))
+			if err := os.Remove(address); err != nil {
+				logger.Fatal("Remove socket file error", zap.Error(err))
+			}
 		}
+
 	}
 
-	socket, err := net.Listen("unix", filePath)
+	socket, err := net.Listen(protocol, address)
 	if err != nil {
 		logger.Error("Cannot listen to the socket", zap.Error(err))
 		panic("Cannot listen to the socket")
 	}
 
-	logger.Info("Listen on socket", zap.String("name", filePath))
+	logger.Info("Listen on socket", zap.String("address", address))
 	return &Batching{
-		Name:       name,
+		Address:    address,
+		protocol:   protocol,
 		socket:     socket,
 		maxLatency: maxLatency,
 		batchSize:  batchSize,

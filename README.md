@@ -12,7 +12,7 @@
 
 * dynamic batching with batch size and latency
 * invalid request won't affects others in the same batch
-* communicate with workers through Unix domain socket
+* communicate with workers through Unix domain socket or TCP
 * load balancing
 
 If you are interested in the design, check my blog [Deep Learning Serving Framework](https://kemingy.github.io/blogs/deep-learning-serving/).
@@ -24,7 +24,9 @@ go run service/app.go --help
 ```
 
 ```
-Usage of app:
+Usage app:
+  -address string
+        socket file or host:port (default "batching.socket")
   -batch int
         max batch size (default 32)
   -capacity int
@@ -33,10 +35,10 @@ Usage of app:
         host address (default "localhost")
   -latency int
         max latency (millisecond) (default 10)
-  -name string
-        socket name: '{name}.socket' (default "batching")
   -port int
         service port (default 8080)
+  -protocol string
+        unix or tcp (default "unix")
   -timeout int
         timeout for a job (millisecond) (default 5000)
 ```
