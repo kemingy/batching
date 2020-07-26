@@ -3,7 +3,7 @@ lint:
 	revive -formatter friendly -config revive.toml service/*.go
 
 build:
-	go build -v service/app.go
+	go build -o app.out -v service/app.go
 
 test:
 	go test -v .
