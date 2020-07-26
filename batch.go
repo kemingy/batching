@@ -49,17 +49,18 @@ func newJob(data []byte, timeout time.Duration) *Job {
 // It generate batch jobs when workers request and send the inference results (or error)
 // to the right client.
 type Batching struct {
-	Address    string // socket file or "{host}:{port}"
-	protocol   string // "unix" (Unix domain socket) or "tcp"
-	socket     net.Listener
-	maxLatency time.Duration // max latency for a batch inference to wait
-	batchSize  int           // max batch size for a batch inference
-	capacity   int           // the capacity of the batching queue
-	timeout    time.Duration // timeout for jobs in the queue
-	logger     *zap.Logger
-	queue      chan *Job       // job queue
-	jobs       map[string]*Job // use job id as the key to find the job
-	jobsLock   sync.Mutex      // lock for jobs
+	Address     string // socket file or "{host}:{port}"
+	protocol    string // "unix" (Unix domain socket) or "tcp"
+	socket      net.Listener
+	maxLatency  time.Duration // max latency for a batch inference to wait
+	batchSize   int           // max batch size for a batch inference
+	capacity    int           // the capacity of the batching queue
+	timeout     time.Duration // timeout for jobs in the queue
+	logger      *zap.Logger
+	queue       chan *Job       // job queue
+	jobs        map[string]*Job // use job id as the key to find the job
+	jobsLock    sync.Mutex      // lock for jobs
+	termination bool            // flag of termination
 }
 
 // NewBatching creates a Batching instance
@@ -87,16 +88,17 @@ func NewBatching(address, protocol string, batchSize, capacity int, maxLatency, 
 
 	logger.Info("Listen on socket", zap.String("address", address))
 	return &Batching{
-		Address:    address,
-		protocol:   protocol,
-		socket:     socket,
-		maxLatency: maxLatency,
-		batchSize:  batchSize,
-		capacity:   capacity,
-		timeout:    timeout,
-		logger:     logger,
-		queue:      make(chan *Job, capacity),
-		jobs:       make(map[string]*Job),
+		Address:     address,
+		protocol:    protocol,
+		socket:      socket,
+		maxLatency:  maxLatency,
+		batchSize:   batchSize,
+		capacity:    capacity,
+		timeout:     timeout,
+		logger:      logger,
+		queue:       make(chan *Job, capacity),
+		jobs:        make(map[string]*Job),
+		termination: false,
 	}
 }
 
@@ -143,6 +145,9 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 
 // Stop the batching service and socket, close the queue channel
 func (b *Batching) Stop() error {
+	b.logger.Info("Trying to terminate the batch service")
+	b.termination = true
+	time.Sleep(b.timeout)
 	b.logger.Info("Close socket and queue channel, flush logging")
 	defer b.logger.Sync()
 	close(b.queue)
@@ -152,7 +157,10 @@ func (b *Batching) Stop() error {
 // send a batch jobs to the workers
 func (b *Batching) send(conn net.Conn) error {
 	batch := make(String2Bytes)
-	job := <-b.queue
+	job, ok := <-b.queue
+	if !ok {
+		return fmt.Errorf("queue is closed")
+	}
 	batch[job.id] = job.data
 	// timing from getting the first query data
 	waitUntil := time.Now().Add(b.maxLatency)
@@ -178,7 +186,7 @@ func (b *Batching) send(conn net.Conn) error {
 
 	data, err := msgpack.Marshal(batch)
 	if err != nil {
-		b.logger.Fatal("Msgpack encode error", zap.Error(err))
+		b.logger.Fatal("MessagePack encode error", zap.Error(err))
 	}
 	length := make([]byte, IntByteLength)
 	binary.BigEndian.PutUint32(length, uint32(len(data)))
@@ -204,7 +212,7 @@ func (b *Batching) receive(conn net.Conn, length uint32) error {
 	batch := make(String2Bytes)
 	err = msgpack.Unmarshal(data, &batch)
 	if err != nil {
-		b.logger.Fatal("Msgpack decode error", zap.Error(err))
+		b.logger.Fatal("MessagePack decode error", zap.Error(err))
 	}
 	b.logger.Debug("Received data", zap.ByteString("data", data))
 
@@ -244,7 +252,11 @@ func (b *Batching) Run() {
 		// accept socket connection
 		conn, err := b.socket.Accept()
 		if err != nil {
-			b.logger.Fatal("Accept error: ", zap.Error(err))
+			if b.termination {
+				b.logger.Info("Socket closed", zap.Error(err))
+				break
+			}
+			b.logger.Fatal("Accept error", zap.Error(err))
 		}
 		b.logger.Info("Accept socket connection",
 			zap.String("local", conn.LocalAddr().String()),
