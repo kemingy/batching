@@ -26,13 +26,13 @@ go run service/app.go --help
 ```
 Usage app:
   -address string
-        socket file or host:port (default "batching.socket")
+        socket file or host:port (default "batch.socket")
   -batch int
         max batch size (default 32)
   -capacity int
         max jobs in the queue (default 1024)
   -host string
-        host address (default "localhost")
+        host address (default "0.0.0.0")
   -latency int
         max latency (millisecond) (default 10)
   -port int
