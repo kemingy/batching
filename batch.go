@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -49,18 +50,17 @@ func newJob(data []byte, timeout time.Duration) *Job {
 // It generate batch jobs when workers request and send the inference results (or error)
 // to the right client.
 type Batching struct {
-	Address     string // socket file or "{host}:{port}"
-	protocol    string // "unix" (Unix domain socket) or "tcp"
-	socket      net.Listener
-	maxLatency  time.Duration // max latency for a batch inference to wait
-	batchSize   int           // max batch size for a batch inference
-	capacity    int           // the capacity of the batching queue
-	timeout     time.Duration // timeout for jobs in the queue
-	logger      *zap.Logger
-	queue       chan *Job       // job queue
-	jobs        map[string]*Job // use job id as the key to find the job
-	jobsLock    sync.Mutex      // lock for jobs
-	termination bool            // flag of termination
+	Address    string // socket file or "{host}:{port}"
+	protocol   string // "unix" (Unix domain socket) or "tcp"
+	socket     net.Listener
+	maxLatency time.Duration // max latency for a batch inference to wait
+	batchSize  int           // max batch size for a batch inference
+	capacity   int           // the capacity of the batching queue
+	timeout    time.Duration // timeout for jobs in the queue
+	logger     *zap.Logger
+	queue      chan *Job       // job queue
+	jobs       map[string]*Job // use job id as the key to find the job
+	jobsLock   sync.Mutex      // lock for jobs
 }
 
 // NewBatching creates a Batching instance
@@ -88,17 +88,16 @@ func NewBatching(address, protocol string, batchSize, capacity int, maxLatency, 
 
 	logger.Info("Listen on socket", zap.String("address", address))
 	return &Batching{
-		Address:     address,
-		protocol:    protocol,
-		socket:      socket,
-		maxLatency:  maxLatency,
-		batchSize:   batchSize,
-		capacity:    capacity,
-		timeout:     timeout,
-		logger:      logger,
-		queue:       make(chan *Job, capacity),
-		jobs:        make(map[string]*Job),
-		termination: false,
+		Address:    address,
+		protocol:   protocol,
+		socket:     socket,
+		maxLatency: maxLatency,
+		batchSize:  batchSize,
+		capacity:   capacity,
+		timeout:    timeout,
+		logger:     logger,
+		queue:      make(chan *Job, capacity),
+		jobs:       make(map[string]*Job),
 	}
 }
 
@@ -146,7 +145,6 @@ func (b *Batching) HandleHTTP(ctx *fasthttp.RequestCtx) {
 // Stop the batching service and socket, close the queue channel
 func (b *Batching) Stop() error {
 	b.logger.Info("Trying to terminate the batch service")
-	b.termination = true
 	time.Sleep(b.timeout)
 	b.logger.Info("Close socket and queue channel, flush logging")
 	defer b.logger.Sync()
@@ -252,8 +250,7 @@ func (b *Batching) Run() {
 		// accept socket connection
 		conn, err := b.socket.Accept()
 		if err != nil {
-			if b.termination {
-				b.logger.Info("Socket closed", zap.Error(err))
+			if strings.Contains(err.Error(), "use of closed network connection") {
 				break
 			}
 			b.logger.Fatal("Accept error", zap.Error(err))
