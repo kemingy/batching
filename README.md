@@ -8,6 +8,10 @@
 
 [Ventu](https://github.com/kemingy/ventu) already implement this protocol, so it can be used as the worker for deep learning inference.
 
+## Attention
+
+**This project is just a proof of concept. Check the [MOSEC](https://github.com/mosecorg/mosec) for production usage.**
+
 ## Features
 
 * dynamic batching with batch size and latency
